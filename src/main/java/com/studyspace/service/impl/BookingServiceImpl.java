@@ -8,6 +8,7 @@ import com.studyspace.constants.CommonConstants;
 import com.studyspace.constants.RoomConstants;
 import com.studyspace.constants.UserConstants;
 import com.studyspace.dto.BookingVO;
+import com.studyspace.dto.CheckInCodeVO;
 import com.studyspace.dto.CreateBookingRequest;
 import com.studyspace.dto.PageResult;
 import com.studyspace.dto.SeatOccupancy;
@@ -63,11 +64,11 @@ public class BookingServiceImpl implements BookingService {
     /** 每人每天最多预约几次（需求第 3 章第 5 步"今天订了几次"） */
     @Value("${booking.daily-limit:3}")
     private int dailyLimit;
-    /** 单次预约最短时长（分钟）：40 分钟的预约刚坐下就得走，不如不订 */
+    /** 单次预约最短时长（分钟）*/
     @Value("${booking.min-duration-minutes:60}")
     private int minDurationMinutes;
     /** 开始前多少分钟以内取消算违约 */
-    @Value("${booking.cancel-free-minutes:30}")
+    @Value("${booking.cancel-free-minutes:15}")
     private int cancelFreeMinutes;
     /** 签到窗口：开始前多少分钟开放签到 */
     @Value("${booking.check-in-early-minutes:15}")
@@ -264,14 +265,41 @@ public class BookingServiceImpl implements BookingService {
         if (!booking.getUserId().equals(userId)) {
             throw new BusinessException(ResultCode.FORBIDDEN);
         }
-        if (BookingStatus.CHECKED_IN.name().equals(booking.getStatus())) {
+        // 第 1 关：状态。每种状态都给出人话提示，别让学生看到"状态不允许"这种提示后一脸懵
+        String status = booking.getStatus();
+        if (BookingStatus.CHECKED_IN.name().equals(status)) {
             throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "已签到，无需重复签到");
         }
-        if (BookingStatus.NO_SHOW.name().equals(booking.getStatus())) {
+        if (BookingStatus.NO_SHOW.name().equals(status)) {
             throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约已超时未签到，座位已释放，请重新预约");
+        }
+        if (BookingStatus.COMPLETED.name().equals(status)) {
+            throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "本次预约已结束，不能再签到");
+        }
+        if (BookingStatus.CANCELLED.name().equals(status)) {
+            throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约已取消，不能签到");
         }
         assertCanTransit(booking, BookingStatus.CHECKED_IN, "签到");
 
+        // 第 2 关：座位和自习室还在不在。座位被停用、自习室临时关闭时，
+        // 放人进来签到了也没地方坐，不如在门口就拦住并告诉他找管理员。
+        Seat seat = seatMapper.selectById(booking.getSeatId());
+        if (seat == null) {
+            throw new BusinessException(ResultCode.SEAT_NOT_FOUND, "座位已被移除，请联系管理员处理");
+        }
+        if (RoomConstants.SEAT_STATUS_DISABLED.equals(seat.getStatus())) {
+            throw new BusinessException(ResultCode.SEAT_DISABLED, "该座位已停用，签到失败，请联系管理员换座");
+        }
+        Room room = roomMapper.selectById(seat.getRoomId());
+        if (room == null) {
+            throw new BusinessException(ResultCode.ROOM_NOT_FOUND);
+        }
+        if (!RoomConstants.ROOM_STATUS_OPEN.equals(room.getStatus())) {
+            throw new BusinessException(ResultCode.ROOM_CLOSED, "自习室当前未开放，暂时不能签到");
+        }
+
+        // 第 3 关：签到窗口 [开始-15 分钟, 开始+15 分钟]，时间以服务端为准，
+        // 学生把手机时间改成明天也签到不了。
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime earliest = booking.getStartTime().minusMinutes(checkInEarlyMinutes);
         LocalDateTime latest = booking.getStartTime().plusMinutes(checkInLateMinutes);
@@ -282,6 +310,8 @@ public class BookingServiceImpl implements BookingService {
             throw new BusinessException(ResultCode.CHECK_IN_WINDOW_CLOSED,
                     "签到已截止（" + fmt(latest) + "），座位将被自动释放，请重新预约");
         }
+
+        // 第 4 关：签到码。前面三关都过了才比对，避免用错误信息"试"出码对不对
         if (code == null || !code.trim().equals(booking.getCheckInCode())) {
             throw new BusinessException(ResultCode.CHECK_IN_CODE_ERROR);
         }
@@ -289,8 +319,28 @@ public class BookingServiceImpl implements BookingService {
         if (bookingMapper.markCheckedIn(bookingId, now) == 0) {
             throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约状态已变化，请刷新后重试");
         }
-        log.info("签到成功：bookingId={}, userId={}", bookingId, userId);
+        // 迟到但仍然在窗口内：不扣分，只记一条日志，方便答辩时演示"迟到签到"
+        long lateMinutes = Duration.between(booking.getStartTime(), now).toMinutes();
+        if (lateMinutes > 0) {
+            log.info("签到成功（迟到 {} 分钟）：bookingId={}, userId={}", lateMinutes, bookingId, userId);
+        } else {
+            log.info("签到成功：bookingId={}, userId={}", bookingId, userId);
+        }
         return assemble(List.of(requireBooking(bookingId)), userId, false).get(0);
+    }
+
+    @Override
+    public CheckInCodeVO checkInCode(Long bookingId, Long viewerId, boolean admin) {
+        Booking booking = requireBooking(bookingId);
+        // 本人看自己的码；管理员能看到是为了在服务台帮学生核对，不给他签到的权限
+        if (!admin && !booking.getUserId().equals(viewerId)) {
+            throw new BusinessException(ResultCode.FORBIDDEN);
+        }
+        Seat seat = seatMapper.selectById(booking.getSeatId());
+        Room room = seat == null ? null : roomMapper.selectById(seat.getRoomId());
+        LocalDateTime windowStart = booking.getStartTime().minusMinutes(checkInEarlyMinutes);
+        LocalDateTime windowEnd = booking.getStartTime().plusMinutes(checkInLateMinutes);
+        return CheckInCodeVO.of(booking, seat, room, windowStart, windowEnd, LocalDateTime.now());
     }
 
     @Override
@@ -300,12 +350,32 @@ public class BookingServiceImpl implements BookingService {
         if (!booking.getUserId().equals(userId)) {
             throw new BusinessException(ResultCode.FORBIDDEN);
         }
+        // 先把"不该签退"的几种情况分开说清楚，比统一报"状态不允许"好排查
+        String status = booking.getStatus();
+        if (BookingStatus.PENDING_CHECKIN.name().equals(status)) {
+            throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "还没有签到，不能签退");
+        }
+        if (BookingStatus.COMPLETED.name().equals(status)) {
+            throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "本次预约已结束，无需重复签退");
+        }
+        if (BookingStatus.NO_SHOW.name().equals(status)) {
+            throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约已超时未签到，座位已释放，无需签退");
+        }
+        if (BookingStatus.CANCELLED.name().equals(status)) {
+            throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约已取消，无需签退");
+        }
         assertCanTransit(booking, BookingStatus.COMPLETED, "签退");
 
-        if (bookingMapper.markCompleted(bookingId, LocalDateTime.now()) == 0) {
+        // 签退时间取"现在"和"预约结束时间"里更早的那个：
+        // 已经过了结束时间才点签退的，记成结束时间，避免统计出"用了 3 小时"的假数据
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime outTime = now.isAfter(booking.getEndTime()) ? booking.getEndTime() : now;
+
+        if (bookingMapper.markCompleted(bookingId, outTime) == 0) {
             throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约状态已变化，请刷新后重试");
         }
-        log.info("签退成功：bookingId={}, userId={}", bookingId, userId);
+        boolean early = outTime.isBefore(booking.getEndTime());
+        log.info("签退成功：bookingId={}, userId={}, 是否提前={}", bookingId, userId, early);
         return assemble(List.of(requireBooking(bookingId)), userId, false).get(0);
     }
 
@@ -450,17 +520,36 @@ public class BookingServiceImpl implements BookingService {
         }).toList();
     }
 
-    /** 计算前端要用的"能不能签到 / 能不能取消 / 取消扣不扣分" */
+    /** 计算前端要用的"能不能签到 / 能不能签退 / 迟到了几分钟 / 实际用了多久" */
     private void fillActions(BookingVO vo, Booking booking, LocalDateTime now, Long viewerId, boolean admin) {
         boolean owner = booking.getUserId().equals(viewerId);
         boolean pending = BookingStatus.PENDING_CHECKIN.name().equals(booking.getStatus());
+        boolean using = BookingStatus.CHECKED_IN.name().equals(booking.getStatus());
         LocalDateTime earliest = booking.getStartTime().minusMinutes(checkInEarlyMinutes);
         LocalDateTime latest = booking.getStartTime().plusMinutes(checkInLateMinutes);
 
+        vo.setCheckInWindowStart(fmt(earliest));
         vo.setCheckInDeadline(fmt(latest));
         vo.setCanCheckIn(owner && pending && !now.isBefore(earliest) && !now.isAfter(latest));
+        vo.setCanCheckOut(owner && using);
         vo.setCanCancel((owner || admin) && pending && now.isBefore(booking.getStartTime()));
         vo.setCancelPenalty(!now.isBefore(booking.getStartTime().minusMinutes(cancelFreeMinutes)));
+
+        // 迟到判断和实际使用时长都用数据库里的真实时间算，不让前端自己算（前端拿的是手机时间）
+        LocalDateTime checkIn = booking.getCheckInTime();
+        LocalDateTime checkOut = booking.getCheckOutTime();
+        if (checkIn != null) {
+            long late = Duration.between(booking.getStartTime(), checkIn).toMinutes();
+            vo.setLateCheckIn(late > 0);
+            vo.setLateMinutes((int) Math.max(late, 0));
+            // 还没签退时按"现在"算，正在使用中也能显示"已使用 42 分钟"
+            LocalDateTime endPoint = checkOut != null ? checkOut : (now.isAfter(checkIn) ? now : checkIn);
+            vo.setUsedMinutes((int) Math.max(Duration.between(checkIn, endPoint).toMinutes(), 0));
+        }
+        if (checkOut != null) {
+            vo.setEarlyCheckOut(checkOut.isBefore(booking.getEndTime()));
+        }
+
         if (!owner && !admin) {
             vo.setCheckInCode(null);
         }

@@ -11,11 +11,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 预约 Mapper
+ * 预约 Mapper（F-09 ~ F-11）
+ *
+ * <p>只放"下单"一侧的 SQL：查冲突、查每日次数、锁座位、改取消状态。
+ * 签到、签退、超时违约的更新语句在 CheckInMapper 里，两个模块各管各的。</p>
+ *
  * <p>重叠判断公式来自需求说明 5.2：新开始 &lt; 旧结束 且 新结束 &gt; 旧开始，
  * 两个符号都是"小于/大于"，不能写成小于等于——12:00 结束、12:00 开始应该是合法接续。</p>
- * <p>状态更新统一带 "AND status = 原状态" 条件（类似乐观锁）：
- * 定时任务和用户操作同时改同一条预约时，只有一个人能改成功，不会出现状态互相覆盖。</p>
  */
 public interface BookingMapper extends BaseMapper<Booking> {
 
@@ -104,59 +106,4 @@ public interface BookingMapper extends BaseMapper<Booking> {
                AND status = 'PENDING_CHECKIN'
             """)
     int markCancelled(@Param("id") Long id, @Param("reason") String reason);
-
-    /** 签到：待签到 → 使用中 */
-    @Update("""
-            UPDATE booking
-               SET status = 'CHECKED_IN',
-                   check_in_time = #{time},
-                   update_time = NOW()
-             WHERE id = #{id}
-               AND status = 'PENDING_CHECKIN'
-            """)
-    int markCheckedIn(@Param("id") Long id, @Param("time") LocalDateTime time);
-
-    /** 签退 / 到点自动结束：使用中 → 已完成 */
-    @Update("""
-            UPDATE booking
-               SET status = 'COMPLETED',
-                   check_out_time = #{time},
-                   update_time = NOW()
-             WHERE id = #{id}
-               AND status = 'CHECKED_IN'
-            """)
-    int markCompleted(@Param("id") Long id, @Param("time") LocalDateTime time);
-
-    /** 超时未签到：待签到 → 违约 */
-    @Update("""
-            UPDATE booking
-               SET status = 'NO_SHOW',
-                   update_time = NOW()
-             WHERE id = #{id}
-               AND status = 'PENDING_CHECKIN'
-            """)
-    int markNoShow(@Param("id") Long id);
-
-    /**
-     * 找出超过签到截止时间还是"待签到"的预约
-     * <p>签到截止 = 开始时间 + check-in-late-minutes，所以条件是 start_time &lt; now - late</p>
-     */
-    @Select("""
-            SELECT id
-            FROM booking
-            WHERE status = 'PENDING_CHECKIN'
-              AND start_time < #{deadline}
-            ORDER BY start_time
-            """)
-    List<Long> selectTimeoutIds(@Param("deadline") LocalDateTime deadline);
-
-    /** 找出已经签到、但结束时间已过的预约，交给定时任务自动完成 */
-    @Select("""
-            SELECT id
-            FROM booking
-            WHERE status = 'CHECKED_IN'
-              AND end_time < #{now}
-            ORDER BY end_time
-            """)
-    List<Long> selectFinishedIds(@Param("now") LocalDateTime now);
 }

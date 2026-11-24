@@ -3,7 +3,6 @@ package com.studyspace.controller;
 import com.studyspace.common.Result;
 import com.studyspace.constants.UserConstants;
 import com.studyspace.dto.BookingVO;
-import com.studyspace.dto.CheckInRequest;
 import com.studyspace.dto.CreateBookingRequest;
 import com.studyspace.dto.PageResult;
 import com.studyspace.security.LoginUser;
@@ -21,9 +20,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 预约接口（A-14 ~ A-19）
+ * 预约接口（A-14 ~ A-17）
  * <p>当前用户身份一律从令牌里取（SecurityUtils），接口参数里没有 userId，
  * 学生就算改请求体也动不了别人的预约。</p>
+ * <p>签到 / 签退 / 签到凭证在 {@link CheckInController} 里，是两个独立模块。</p>
  */
 @RestController
 @RequestMapping("/api/bookings")
@@ -64,17 +64,7 @@ public class BookingController {
         return Result.success(penalty ? "取消成功，因临近开始时间，已扣除信用分 " + vo.getPenaltyPoints() + " 分" : "取消成功", vo);
     }
 
-    /** A-18 签到：校验签到窗口和 4 位签到码 */
-    @PostMapping("/{id}/check-in")
-    public Result<BookingVO> checkIn(@PathVariable Long id, @Valid @RequestBody CheckInRequest request) {
-        return Result.success("签到成功", bookingService.checkIn(id, SecurityUtils.currentUserId(), request.getCode()));
-    }
-
-    /** A-19 签退：使用中 → 已完成 */
-    @PostMapping("/{id}/check-out")
-    public Result<BookingVO> checkOut(@PathVariable Long id) {
-        return Result.success("签退成功，本次预约已完成", bookingService.checkOut(id, SecurityUtils.currentUserId()));
-    }
+    // 签到 / 签退 / 签到凭证三个接口在 CheckInController 里，属于独立的签到签退模块
 
     private static boolean isAdmin(LoginUser user) {
         return UserConstants.ROLE_ADMIN.equals(user.getRole());

@@ -41,17 +41,29 @@ public class BookingVO {
     private String checkInCode;
     private String checkInTime;
     private String checkOutTime;
+    /** 可以开始签到的时间 = 开始时间 - 15 分钟 */
+    private String checkInWindowStart;
     /** 签到截止时间 = 开始时间 + 15 分钟，前端可以显示倒计时 */
     private String checkInDeadline;
     private String cancelReason;
     /** 现在能不能签到（本人在签到窗口内、且状态是待签到） */
     private boolean canCheckIn;
+    /** 现在能不能签退（本人、状态是使用中） */
+    private boolean canCheckOut;
     /** 现在能不能取消（本人或管理员、状态待签到、还没到开始时间） */
     private boolean canCancel;
     /** 现在取消会不会扣分（开始前 30 分钟以内） */
     private boolean cancelPenalty;
     /** 本次取消实际扣了多少分，0 表示没扣；只在取消接口的返回里有值 */
     private Integer penaltyPoints;
+    /** 是不是迟到签到（实际签到时间晚于预约开始时间） */
+    private boolean lateCheckIn;
+    /** 迟到多少分钟，没迟到就是 0 */
+    private int lateMinutes;
+    /** 是不是提前签退（实际签退时间早于预约结束时间，座位会提前释放） */
+    private boolean earlyCheckOut;
+    /** 实际使用时长（分钟）：签到时间到签退时间，使用中则算到现在 */
+    private Integer usedMinutes;
     private String createTime;
 
     public static BookingVO from(Booking booking, Seat seat, Room room, User owner) {
