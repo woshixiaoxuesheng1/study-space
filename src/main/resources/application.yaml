@@ -1,0 +1,37 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: study-space
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/study_space?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: "123456"
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000
+
+mybatis-plus:
+  configuration:
+    # 数据库下划线字段 -> Java 驼峰属性，如 student_no -> studentNo
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      # 逻辑删除：表里有 deleted 字段的实体自动生效
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# JWT 配置：secret 至少 32 个字符（HS256 要求），生产环境请放到环境变量里
+jwt:
+  secret: study-space-jwt-secret-key-2026-campus-room-booking-system
+  expire-minutes: 120
+
+logging:
+  level:
+    com.studyspace.mapper: debug
