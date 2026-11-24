@@ -27,6 +27,19 @@ public enum ResultCode {
     BOOKING_TIME_INVALID(2007, "结束时间必须晚于开始时间"),
     OUT_OF_OPEN_TIME(2008, "查询时间不在自习室开放时间内"),
 
+    BOOKING_NOT_FOUND(3001, "预约不存在"),
+    SEAT_NOT_FOUND(3002, "座位不存在"),
+    SEAT_DISABLED(3003, "该座位已停用，暂时无法预约"),
+    SEAT_ALREADY_BOOKED(3004, "该座位在所选时段已被预约"),
+    BOOKING_TIME_CONFLICT(3005, "你在该时段已有其他预约"),
+    BOOKING_DAILY_LIMIT(3006, "今日预约次数已达上限"),
+    CREDIT_NOT_ENOUGH(3007, "信用分不足，暂时无法预约"),
+    BOOKING_STATUS_NOT_ALLOWED(3008, "当前预约状态不允许此操作"),
+    CHECK_IN_WINDOW_CLOSED(3009, "不在签到时间窗口内"),
+    CHECK_IN_CODE_ERROR(3010, "签到码不正确"),
+    BOOKING_ALREADY_STARTED(3011, "预约已开始，无法取消"),
+    BOOKING_TIME_PAST(3012, "只能预约未来的时间段"),
+
     SERVER_ERROR(500, "系统繁忙，请稍后再试");
 
     private final int code;

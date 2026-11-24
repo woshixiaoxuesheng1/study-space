@@ -3,6 +3,9 @@ package com.studyspace.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.studyspace.common.BusinessException;
 import com.studyspace.common.ResultCode;
+import com.studyspace.constants.BookingConstants;
+import com.studyspace.constants.CommonConstants;
+import com.studyspace.constants.RoomConstants;
 import com.studyspace.dto.PageResult;
 import com.studyspace.dto.RoomRequest;
 import com.studyspace.dto.RoomVO;
@@ -41,19 +44,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class RoomServiceImpl implements RoomService {
 
-    private static final String STATUS_OPEN = "OPEN";
-    private static final String STATUS_FREE = "FREE";
-    private static final String STATUS_BOOKED = "BOOKED";
-    private static final String STATUS_IN_USE = "IN_USE";
-    private static final String STATUS_DISABLED = "DISABLED";
-    private static final String BOOKING_PENDING = "PENDING_CHECKIN";
-    private static final String BOOKING_CHECKED_IN = "CHECKED_IN";
-    private static final String SEAT_WINDOW = "WINDOW";
-    private static final String SEAT_POWER = "POWER";
-    private static final String SEAT_NORMAL = "NORMAL";
-    /** 一页最多返回多少条，防止前端传 size=99999 把数据库拖垮 */
-    private static final int MAX_PAGE_SIZE = 100;
-
     private final RoomMapper roomMapper;
     private final SeatMapper seatMapper;
     private final BookingMapper bookingMapper;
@@ -61,7 +51,7 @@ public class RoomServiceImpl implements RoomService {
     @Override
     public PageResult<RoomVO> pageRooms(int page, int size, String status, String keyword) {
         int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        int safeSize = Math.min(Math.max(size, 1), CommonConstants.MAX_PAGE_SIZE);
         String key = StringUtils.hasText(keyword) ? keyword.trim() : null;
 
         LambdaQueryWrapper<Room> wrapper = new LambdaQueryWrapper<Room>()
@@ -94,7 +84,7 @@ public class RoomServiceImpl implements RoomService {
 
         Room room = new Room();
         fill(room, request);
-        room.setStatus(StringUtils.hasText(request.getStatus()) ? request.getStatus() : STATUS_OPEN);
+        room.setStatus(StringUtils.hasText(request.getStatus()) ? request.getStatus() : RoomConstants.ROOM_STATUS_OPEN);
         room.setSeatCount(0);
         roomMapper.insert(room);
 
@@ -189,7 +179,7 @@ public class RoomServiceImpl implements RoomService {
                 seat.setRowNo(r);
                 seat.setColNo(c);
                 seat.setSeatType(seatType(c, cols));
-                seat.setStatus(STATUS_FREE);
+                seat.setStatus(RoomConstants.SEAT_STATUS_FREE);
                 seats.add(seat);
             }
         }
@@ -206,7 +196,7 @@ public class RoomServiceImpl implements RoomService {
     @Override
     public List<SeatVO> listFreeSeats(Long roomId, LocalDate date, String startTime, String endTime) {
         Room room = requireRoom(roomId);
-        if (!STATUS_OPEN.equals(room.getStatus())) {
+        if (!RoomConstants.ROOM_STATUS_OPEN.equals(room.getStatus())) {
             throw new BusinessException(ResultCode.ROOM_CLOSED);
         }
 
@@ -223,14 +213,14 @@ public class RoomServiceImpl implements RoomService {
         // 停用的座位不参与查询（坏了/维修中）
         List<Seat> seats = seatMapper.selectList(new LambdaQueryWrapper<Seat>()
                 .eq(Seat::getRoomId, roomId)
-                .ne(Seat::getStatus, STATUS_DISABLED)
+                .ne(Seat::getStatus, RoomConstants.SEAT_STATUS_DISABLED)
                 .orderByAsc(Seat::getRowNo)
                 .orderByAsc(Seat::getColNo));
 
         Map<Long, String> occupancy = occupancyMap(roomId, start, end);
         return seats.stream()
                 .filter(seat -> !occupancy.containsKey(seat.getId()))
-                .map(seat -> SeatVO.from(seat, STATUS_FREE))
+                .map(seat -> SeatVO.from(seat, RoomConstants.SEAT_STATUS_FREE))
                 .toList();
     }
 
@@ -275,9 +265,9 @@ public class RoomServiceImpl implements RoomService {
     /** 座位类型规则与 init.sql 一致：第一列靠窗，最后一列带插座，其余普通 */
     private String seatType(int col, int cols) {
         if (col == 1) {
-            return SEAT_WINDOW;
+            return RoomConstants.SEAT_TYPE_WINDOW;
         }
-        return col == cols ? SEAT_POWER : SEAT_NORMAL;
+        return col == cols ? RoomConstants.SEAT_TYPE_POWER : RoomConstants.SEAT_TYPE_NORMAL;
     }
 
     /** 把预约记录转成"座位 id → 占用状态"，同一座位多条时使用中优先 */
@@ -285,7 +275,7 @@ public class RoomServiceImpl implements RoomService {
         Map<Long, String> map = new HashMap<>();
         for (SeatOccupancy item : bookingMapper.selectOccupancy(roomId, start, end)) {
             String old = map.get(item.getSeatId());
-            if (old == null || BOOKING_CHECKED_IN.equals(item.getStatus())) {
+            if (old == null || BookingConstants.STATUS_CHECKED_IN.equals(item.getStatus())) {
                 map.put(item.getSeatId(), item.getStatus());
             }
         }
@@ -293,14 +283,16 @@ public class RoomServiceImpl implements RoomService {
     }
 
     private String resolveStatus(Seat seat, Map<Long, String> occupancy) {
-        if (STATUS_DISABLED.equals(seat.getStatus())) {
-            return STATUS_DISABLED;
+        if (RoomConstants.SEAT_STATUS_DISABLED.equals(seat.getStatus())) {
+            return RoomConstants.SEAT_STATUS_DISABLED;
         }
         String bookingStatus = occupancy.get(seat.getId());
-        if (BOOKING_CHECKED_IN.equals(bookingStatus)) {
-            return STATUS_IN_USE;
+        if (BookingConstants.STATUS_CHECKED_IN.equals(bookingStatus)) {
+            return RoomConstants.SEAT_STATUS_IN_USE;
         }
-        return BOOKING_PENDING.equals(bookingStatus) ? STATUS_BOOKED : STATUS_FREE;
+        return BookingConstants.STATUS_PENDING_CHECKIN.equals(bookingStatus)
+                ? RoomConstants.SEAT_STATUS_BOOKED
+                : RoomConstants.SEAT_STATUS_FREE;
     }
 
     /** 兼容 "10:00" 和 "10:00:00" 两种写法 */
