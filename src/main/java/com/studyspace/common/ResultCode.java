@@ -39,6 +39,7 @@ public enum ResultCode {
     CHECK_IN_CODE_ERROR(3010, "签到码不正确"),
     BOOKING_ALREADY_STARTED(3011, "预约已开始，无法取消"),
     BOOKING_TIME_PAST(3012, "只能预约未来的时间段"),
+    BOOKING_DURATION_TOO_SHORT(3013, "预约时长太短"),
 
     SERVER_ERROR(500, "系统繁忙，请稍后再试");
 

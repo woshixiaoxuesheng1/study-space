@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,9 @@ public class BookingServiceImpl implements BookingService {
     /** 每人每天最多预约几次（需求第 3 章第 5 步"今天订了几次"） */
     @Value("${booking.daily-limit:3}")
     private int dailyLimit;
+    /** 单次预约最短时长（分钟）：40 分钟的预约刚坐下就得走，不如不订 */
+    @Value("${booking.min-duration-minutes:60}")
+    private int minDurationMinutes;
     /** 开始前多少分钟以内取消算违约 */
     @Value("${booking.cancel-free-minutes:30}")
     private int cancelFreeMinutes;
@@ -97,6 +101,11 @@ public class BookingServiceImpl implements BookingService {
 
         if (!start.isBefore(end)) {
             throw new BusinessException(ResultCode.BOOKING_TIME_INVALID);
+        }
+        // 最短时长校验：时长从配置读，改 yaml 即可调整，不用动代码
+        if (Duration.between(start, end).toMinutes() < minDurationMinutes) {
+            throw new BusinessException(ResultCode.BOOKING_DURATION_TOO_SHORT,
+                    "单次预约时长不能少于 " + minDurationMinutes + " 分钟");
         }
         // 不限制跨天，开放时间校验就会失真（22:00-次日01:00 会被当成合法），这里直接拒绝
         if (!start.toLocalDate().equals(end.toLocalDate())) {
