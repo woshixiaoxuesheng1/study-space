@@ -16,6 +16,7 @@ spring:
 
 mybatis-plus:
   configuration:
+    #开启驼峰命名
     # 数据库下划线字段 -> Java 驼峰属性，如 student_no -> studentNo
     map-underscore-to-camel-case: true
   global-config:

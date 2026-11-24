@@ -18,6 +18,15 @@ public enum ResultCode {
     ACCOUNT_NOT_FOUND(1003, "学号或密码错误"),
     ACCOUNT_DISABLED(1005, "账号已被禁用，请联系管理员"),
 
+    ROOM_NOT_FOUND(2001, "自习室不存在"),
+    ROOM_NAME_EXISTS(2002, "该楼栋下已存在同名自习室"),
+    ROOM_TIME_INVALID(2003, "开放时间必须早于关闭时间"),
+    ROOM_HAS_ACTIVE_BOOKING(2004, "该自习室还有进行中的预约，暂时不能删除"),
+    ROOM_SEAT_LOCKED(2005, "该自习室的座位已有预约记录，不能重新生成"),
+    ROOM_CLOSED(2006, "该自习室当前不在开放状态"),
+    BOOKING_TIME_INVALID(2007, "结束时间必须晚于开始时间"),
+    OUT_OF_OPEN_TIME(2008, "查询时间不在自习室开放时间内"),
+
     SERVER_ERROR(500, "系统繁忙，请稍后再试");
 
     private final int code;

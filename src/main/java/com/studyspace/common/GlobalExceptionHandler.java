@@ -39,10 +39,17 @@ public class GlobalExceptionHandler {
         return Result.fail(ResultCode.PARAM_ERROR.getCode(), "请求体格式错误");
     }
 
-    /** 唯一索引冲突：注册时两个请求同时插同一个学号会走到这里 */
+    /** 唯一索引冲突：注册时两个请求同时插同一个学号、或座位号重复会走到这里 */
     @ExceptionHandler(DuplicateKeyException.class)
     public Result<Void> handleDuplicateKey(DuplicateKeyException e) {
         log.warn("唯一索引冲突：{}", e.getMessage());
+        String detail = String.valueOf(e.getMessage());
+        if (detail.contains("uk_room_seat_no")) {
+            return Result.fail(ResultCode.PARAM_ERROR.getCode(), "座位号重复，请调整行列数后重试");
+        }
+        if (detail.contains("uk_booking_no")) {
+            return Result.fail(ResultCode.PARAM_ERROR.getCode(), "预约编号重复，请重试");
+        }
         return Result.fail(ResultCode.STUDENT_NO_EXISTS);
     }
 

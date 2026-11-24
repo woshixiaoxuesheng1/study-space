@@ -52,6 +52,17 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/register", "/api/login", "/error").permitAll()
+                        // ---------------- 资源管理：写操作只放管理员 ----------------
+                        // 这里用路径 + 请求方法做规则，好处是一条规则覆盖整类接口，
+                        // 新加的自习室写接口只要挂在同一路径下就自动受保护，不会漏。
+                        // 学生拿自己的令牌调这些接口会被 accessDeniedHandler 拦成 403「无权访问」。
+                        .requestMatchers(HttpMethod.POST, "/api/rooms").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/rooms/*/seats/batch").hasRole("ADMIN")
+                        // "/api/rooms/*" 只匹配一层，即 /api/rooms/5；
+                        // /api/rooms/5/seats 这种读接口不会被误伤
+                        .requestMatchers(HttpMethod.PUT, "/api/rooms/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/rooms/*").hasRole("ADMIN")
+                        // 其余接口（查自习室、查座位、个人中心等）登录即可访问
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authException) ->
