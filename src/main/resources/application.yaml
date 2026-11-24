@@ -13,6 +13,16 @@ spring:
       minimum-idle: 5
       maximum-pool-size: 20
       connection-timeout: 30000
+  # Redis：存登录状态（白名单 + 会话快照）和登录失败次数
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 0
+      # 本机开发没设密码，有密码时填 password
+      timeout: 3s
+      lettuce:
+        shutdown-timeout: 200ms
 
 mybatis-plus:
   configuration:
@@ -32,6 +42,17 @@ mybatis-plus:
 jwt:
   secret: study-space-jwt-secret-key-2026-campus-room-booking-system
   expire-minutes: 120
+
+# 登录安全策略：连续失败若干次就锁定账号，防止暴力破解
+login:
+  # 连续失败多少次锁定
+  max-fail-times: 5
+  # 锁定时长（分钟）
+  lock-minutes: 15
+  # 失败次数统计窗口（分钟）：15 分钟内没再失败，计数自动清零
+  fail-window-minutes: 15
+  # 同一账号是否只允许一个有效会话（新登录把旧登录顶下线）
+  single-session: true
 
 # 预约规则：改这里就能调整业务参数，不用改 Java 代码
 booking:

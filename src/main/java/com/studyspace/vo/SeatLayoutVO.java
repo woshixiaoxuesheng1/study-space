@@ -1,4 +1,4 @@
-package com.studyspace.dto;
+package com.studyspace.vo;
 
 import lombok.Data;
 

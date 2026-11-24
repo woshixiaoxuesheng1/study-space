@@ -1,11 +1,11 @@
 package com.studyspace.service;
 
-import com.studyspace.dto.CreditVO;
 import com.studyspace.dto.LoginRequest;
-import com.studyspace.dto.LoginResponse;
 import com.studyspace.dto.RegisterRequest;
 import com.studyspace.dto.UpdateProfileRequest;
-import com.studyspace.dto.UserVO;
+import com.studyspace.vo.CreditVO;
+import com.studyspace.vo.LoginVO;
+import com.studyspace.vo.UserVO;
 
 /**
  * 用户相关业务
@@ -16,7 +16,10 @@ public interface UserService {
     UserVO register(RegisterRequest request);
 
     /** 登录并签发令牌（F-01 / F-02） */
-    LoginResponse login(LoginRequest request);
+    LoginVO login(LoginRequest request);
+
+    /** 退出登录：把令牌从 Redis 白名单里移除，令其立即失效（F-01） */
+    void logout(String token);
 
     /** 查看自己的资料（F-03） */
     UserVO getProfile(Long userId);

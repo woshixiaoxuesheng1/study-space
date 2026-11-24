@@ -1,7 +1,7 @@
 package com.studyspace.service;
 
-import com.studyspace.dto.BookingVO;
-import com.studyspace.dto.CheckInCodeVO;
+import com.studyspace.vo.BookingVO;
+import com.studyspace.vo.CheckInCodeVO;
 
 import java.util.List;
 

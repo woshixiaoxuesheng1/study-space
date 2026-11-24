@@ -17,6 +17,7 @@ public enum ResultCode {
     EMAIL_EXISTS(1002, "该邮箱已被使用"),
     ACCOUNT_NOT_FOUND(1003, "学号或密码错误"),
     ACCOUNT_DISABLED(1005, "账号已被禁用，请联系管理员"),
+    LOGIN_LOCKED(1006, "密码错误次数过多，账号已临时锁定"),
 
     ROOM_NOT_FOUND(2001, "自习室不存在"),
     ROOM_NAME_EXISTS(2002, "该楼栋下已存在同名自习室"),

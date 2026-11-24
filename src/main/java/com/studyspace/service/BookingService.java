@@ -1,6 +1,6 @@
 package com.studyspace.service;
 
-import com.studyspace.dto.BookingVO;
+import com.studyspace.vo.BookingVO;
 import com.studyspace.dto.CreateBookingRequest;
 import com.studyspace.dto.PageResult;
 

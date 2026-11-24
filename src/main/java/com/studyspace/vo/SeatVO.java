@@ -1,4 +1,4 @@
-package com.studyspace.dto;
+package com.studyspace.vo;
 
 import com.studyspace.entity.Seat;
 import lombok.Data;

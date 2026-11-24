@@ -2,10 +2,10 @@ package com.studyspace.service;
 
 import com.studyspace.dto.PageResult;
 import com.studyspace.dto.RoomRequest;
-import com.studyspace.dto.RoomVO;
+import com.studyspace.vo.RoomVO;
 import com.studyspace.dto.SeatBatchRequest;
-import com.studyspace.dto.SeatLayoutVO;
-import com.studyspace.dto.SeatVO;
+import com.studyspace.vo.SeatLayoutVO;
+import com.studyspace.vo.SeatVO;
 
 import java.time.LocalDate;
 import java.util.List;

@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 @Component
 public class MyMetaObjectHandler implements MetaObjectHandler {
 
+    // 钩子函数执行insert和save方法前设置当前时间
     @Override
     public void insertFill(MetaObject metaObject) {
         LocalDateTime now = LocalDateTime.now();
@@ -21,6 +22,7 @@ public class MyMetaObjectHandler implements MetaObjectHandler {
         this.strictInsertFill(metaObject, "updateTime", LocalDateTime.class, now);
     }
 
+    //执行update前更新当前时间
     @Override
     public void updateFill(MetaObject metaObject) {
         this.strictUpdateFill(metaObject, "updateTime", LocalDateTime.class, LocalDateTime.now());

@@ -1,9 +1,9 @@
 package com.studyspace.controller;
 
 import com.studyspace.common.Result;
-import com.studyspace.dto.CreditVO;
+import com.studyspace.vo.CreditVO;
 import com.studyspace.dto.UpdateProfileRequest;
-import com.studyspace.dto.UserVO;
+import com.studyspace.vo.UserVO;
 import com.studyspace.security.SecurityUtils;
 import com.studyspace.service.UserService;
 import jakarta.validation.Valid;

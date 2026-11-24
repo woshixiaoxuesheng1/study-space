@@ -2,8 +2,8 @@ package com.studyspace.controller;
 
 import com.studyspace.common.Result;
 import com.studyspace.constants.UserConstants;
-import com.studyspace.dto.BookingVO;
-import com.studyspace.dto.CheckInCodeVO;
+import com.studyspace.vo.BookingVO;
+import com.studyspace.vo.CheckInCodeVO;
 import com.studyspace.dto.CheckInRequest;
 import com.studyspace.security.LoginUser;
 import com.studyspace.security.SecurityUtils;
@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>为什么路径还是 /api/bookings/...：需求文档第 7 章和前端都按这套地址写好了，
  * 模块拆分只动代码结构、不动接口契约，前端一行都不用改。</p>
  *
- * <p>和预约模块的分工：预约模块负责"下单、改时间、取消"，
+ * <p>与预约模块的职责边界：预约模块负责"下单、改时间、取消"，
  * 这里负责"人来了没有、走了没有"，各自有独立的 Service 和 Mapper。</p>
  */
 @RestController

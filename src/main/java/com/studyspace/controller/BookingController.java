@@ -2,7 +2,7 @@ package com.studyspace.controller;
 
 import com.studyspace.common.Result;
 import com.studyspace.constants.UserConstants;
-import com.studyspace.dto.BookingVO;
+import com.studyspace.vo.BookingVO;
 import com.studyspace.dto.CreateBookingRequest;
 import com.studyspace.dto.PageResult;
 import com.studyspace.security.LoginUser;

@@ -5,16 +5,17 @@ import com.studyspace.common.BusinessException;
 import com.studyspace.common.ResultCode;
 import com.studyspace.constants.CommonConstants;
 import com.studyspace.constants.UserConstants;
-import com.studyspace.dto.CreditVO;
 import com.studyspace.dto.LoginRequest;
-import com.studyspace.dto.LoginResponse;
 import com.studyspace.dto.RegisterRequest;
 import com.studyspace.dto.UpdateProfileRequest;
-import com.studyspace.dto.UserVO;
 import com.studyspace.entity.User;
 import com.studyspace.mapper.UserMapper;
 import com.studyspace.security.JwtUtil;
+import com.studyspace.security.LoginSessionStore;
 import com.studyspace.service.UserService;
+import com.studyspace.vo.CreditVO;
+import com.studyspace.vo.LoginVO;
+import com.studyspace.vo.UserVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,6 +37,7 @@ public class UserServiceImpl implements UserService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final LoginSessionStore loginSessionStore;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -73,21 +75,51 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public LoginResponse login(LoginRequest request) {
+    public LoginVO login(LoginRequest request) {
+        String studentNo = request.getStudentNo().trim();
+
+        // 0. 先看账号是否在锁定期：锁定期内连密码都不校验，直接拒绝
+        //    否则攻击者可以一边爆破解锁一边继续试密码
+        if (loginSessionStore.isLocked(studentNo)) {
+            long remainMinutes = Math.max(1, loginSessionStore.lockRemainSeconds(studentNo) / 60);
+            throw new BusinessException(ResultCode.LOGIN_LOCKED,
+                    "密码错误次数过多，账号已锁定，请 " + remainMinutes + " 分钟后再试");
+        }
+
         User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
-                .eq(User::getStudentNo, request.getStudentNo()));
+                .eq(User::getStudentNo, studentNo));
 
         // 账号不存在和密码错误返回同一句提示，避免别人拿它来试探哪个学号已注册
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new BusinessException(ResultCode.ACCOUNT_NOT_FOUND);
+            int failTimes = loginSessionStore.increaseFail(studentNo);
+            int maxTimes = loginSessionStore.getMaxFailTimes();
+            if (failTimes >= maxTimes) {
+                // 达到阈值：上锁，并把计数器清零，避免解锁后又立即被累计的旧次数触发
+                loginSessionStore.lock(studentNo);
+                loginSessionStore.clearFail(studentNo);
+                throw new BusinessException(ResultCode.LOGIN_LOCKED,
+                        "密码错误 " + failTimes + " 次，账号已锁定 " + loginSessionStore.getLockMinutes() + " 分钟");
+            }
+            throw new BusinessException(ResultCode.ACCOUNT_NOT_FOUND,
+                    "学号或密码错误，还可尝试 " + (maxTimes - failTimes) + " 次");
         }
         if (user.getStatus() != null && user.getStatus() != UserConstants.STATUS_NORMAL) {
             throw new BusinessException(ResultCode.ACCOUNT_DISABLED);
         }
 
+        // 登录成功：清零失败计数，签发令牌，并写入 Redis（白名单 + 会话快照）
+        loginSessionStore.clearFail(studentNo);
         String token = jwtUtil.generateToken(user.getId(), user.getStudentNo(), user.getRole());
-        log.info("登录成功：studentNo={}", user.getStudentNo());
-        return new LoginResponse(token, "Bearer", jwtUtil.getExpiresInSeconds(), UserVO.from(user));
+        loginSessionStore.save(token, user, Duration.ofSeconds(jwtUtil.getExpiresInSeconds()));
+        log.info("登录成功：studentNo={}, userId={}", user.getStudentNo(), user.getId());
+        return new LoginVO(token, "Bearer", jwtUtil.getExpiresInSeconds(), UserVO.from(user));
+    }
+
+    @Override
+    public void logout(String token) {
+        Long userId = loginSessionStore.userIdOf(token);
+        loginSessionStore.destroy(token);
+        log.info("退出登录，令牌已失效：userId={}", userId);
     }
 
     @Override

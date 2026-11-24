@@ -1,4 +1,4 @@
-package com.studyspace.dto;
+package com.studyspace.vo;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -8,7 +8,7 @@ import lombok.Data;
  */
 @Data
 @AllArgsConstructor
-public class LoginResponse {
+public class LoginVO {
 
     /** 访问令牌，之后每个请求放在请求头 Authorization: Bearer {token} */
     private String token;
