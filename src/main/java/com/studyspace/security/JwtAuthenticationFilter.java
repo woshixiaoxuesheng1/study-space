@@ -40,6 +40,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final LoginSessionStore loginSessionStore;
 
+    // 前端的每次请求都执行该方法
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -59,15 +60,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             loginUser, null,
                             List.of(new SimpleGrantedAuthority("ROLE_" + loginUser.getRole())));
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    // 设置认证信息到 SecurityContext
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                 } else {
                     log.debug("令牌不在白名单中（已退出或被顶下线）：studentNo={}", claims.get("studentNo", String.class));
-                    SecurityContextHolder.clearContext();
                 }
             } catch (JwtException | IllegalArgumentException e) {
                 // 令牌过期、被篡改、格式不对都走这里，不抛异常，交给 401 入口处理
                 log.debug("令牌校验失败：{}", e.getMessage());
-                SecurityContextHolder.clearContext();
             }
         }
         filterChain.doFilter(request, response);

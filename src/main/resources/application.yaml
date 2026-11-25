@@ -48,7 +48,7 @@ login:
   # 连续失败多少次锁定
   max-fail-times: 5
   # 锁定时长（分钟）
-  lock-minutes: 15
+  lock-minutes: 5
   # 失败次数统计窗口（分钟）：15 分钟内没再失败，计数自动清零
   fail-window-minutes: 15
   # 同一账号是否只允许一个有效会话（新登录把旧登录顶下线）
@@ -61,7 +61,7 @@ booking:
   # 单次预约最短时长（分钟），不足这个时长不允许提交
   min-duration-minutes: 60
   # 开始前多少分钟以外取消免费；以内取消算违约
-  cancel-free-minutes: 30
+  cancel-free-minutes: 15
   # 签到窗口：开始前 15 分钟开放、开始后 15 分钟截止，共 30 分钟
   check-in-early-minutes: 15
   check-in-late-minutes: 15

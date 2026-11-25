@@ -31,6 +31,7 @@ import java.time.LocalDateTime;
  */
 @Slf4j
 @Service
+// 自动注入依赖，无需 @Autowired或者构造器注入 以及所有未初始化且标注了@NonNull的字段
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 

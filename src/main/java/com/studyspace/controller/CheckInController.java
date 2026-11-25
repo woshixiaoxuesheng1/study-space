@@ -1,7 +1,6 @@
 package com.studyspace.controller;
 
 import com.studyspace.common.Result;
-import com.studyspace.constants.UserConstants;
 import com.studyspace.vo.BookingVO;
 import com.studyspace.vo.CheckInCodeVO;
 import com.studyspace.dto.CheckInRequest;
@@ -47,7 +46,7 @@ public class CheckInController {
     @GetMapping("/{id}/check-in-code")
     public Result<CheckInCodeVO> checkInCode(@PathVariable Long id) {
         LoginUser user = SecurityUtils.currentUser();
-        return Result.success(checkInService.checkInCode(id, user.getId(), isAdmin(user)));
+        return Result.success(checkInService.checkInCode(id, user.getId(), SecurityUtils.isAdmin(user)));
     }
 
     /** A-19 签退：使用中 → 已完成，提前签退座位立即释放 */
@@ -58,9 +57,5 @@ public class CheckInController {
                 ? "签退成功，本次预约已提前结束，座位已释放"
                 : "签退成功，本次预约已完成";
         return Result.success(message, vo);
-    }
-
-    private static boolean isAdmin(LoginUser user) {
-        return UserConstants.ROLE_ADMIN.equals(user.getRole());
     }
 }

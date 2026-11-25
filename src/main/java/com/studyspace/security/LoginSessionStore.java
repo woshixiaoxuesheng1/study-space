@@ -2,6 +2,7 @@ package com.studyspace.security;
 
 import com.studyspace.constants.CommonConstants;
 import com.studyspace.entity.User;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,7 +21,7 @@ import java.util.Map;
  * 这里用 Redis 存三类键：</p>
  *
  * <pre>
- * login:token:{token}   -> userId            令牌白名单，TTL = 令牌有效期
+ * login:token:{token}   -> userId            令牌白名单（只允许名单内的令牌通过或使用，TTL = 令牌有效期
  * login:user:{userId}   -> Hash(会话快照)     登录状态，TTL 同上
  * login:fail:{学号}      -> 失败次数           计数器，TTL = 统计窗口
  * login:lock:{学号}      -> 解锁时间           锁定标记，TTL = 锁定时长
@@ -48,8 +49,10 @@ public class LoginSessionStore {
     /** 是否同一账号只允许一个有效会话（新登录顶掉旧登录） */
     private final boolean singleSession;
     /** 连续失败多少次锁定 */
+    @Getter
     private final int maxFailTimes;
     /** 锁定时长（分钟） */
+    @Getter
     private final int lockMinutes;
     /** 失败次数统计窗口（分钟），超过窗口没再失败就自动清零 */
     private final int failWindowMinutes;
@@ -152,6 +155,7 @@ public class LoginSessionStore {
         redis.delete(FAIL_KEY_PREFIX + studentNo);
     }
 
+    /** 获取失败次数 */
     public int getFailTimes(String studentNo) {
         String value = redis.opsForValue().get(FAIL_KEY_PREFIX + studentNo);
         return value == null ? 0 : Integer.parseInt(value);
@@ -176,11 +180,4 @@ public class LoginSessionStore {
         return seconds == null || seconds < 0 ? 0 : seconds;
     }
 
-    public int getMaxFailTimes() {
-        return maxFailTimes;
-    }
-
-    public int getLockMinutes() {
-        return lockMinutes;
-    }
 }

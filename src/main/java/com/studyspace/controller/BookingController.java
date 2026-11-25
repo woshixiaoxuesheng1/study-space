@@ -1,7 +1,6 @@
 package com.studyspace.controller;
 
 import com.studyspace.common.Result;
-import com.studyspace.constants.UserConstants;
 import com.studyspace.vo.BookingVO;
 import com.studyspace.dto.CreateBookingRequest;
 import com.studyspace.dto.PageResult;
@@ -23,7 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
  * 预约接口（A-14 ~ A-17）
  * <p>当前用户身份一律从令牌里取（SecurityUtils），接口参数里没有 userId，
  * 学生就算改请求体也动不了别人的预约。</p>
- * <p>签到 / 签退 / 签到凭证在 {@link CheckInController} 里，是两个独立模块。</p>
  */
 @RestController
 @RequestMapping("/api/bookings")
@@ -51,7 +49,7 @@ public class BookingController {
     @GetMapping("/{id}")
     public Result<BookingVO> detail(@PathVariable Long id) {
         LoginUser user = SecurityUtils.currentUser();
-        return Result.success(bookingService.detail(id, user.getId(), isAdmin(user)));
+        return Result.success(bookingService.detail(id, user.getId(), SecurityUtils.isAdmin(user)));
     }
 
     /** A-17 取消预约：开始前 30 分钟以内取消会扣 10 分，管理员代取消不扣 */
@@ -59,14 +57,8 @@ public class BookingController {
     public Result<BookingVO> cancel(@PathVariable Long id,
                                     @RequestParam(required = false) String reason) {
         LoginUser user = SecurityUtils.currentUser();
-        BookingVO vo = bookingService.cancel(id, user.getId(), isAdmin(user), reason);
+        BookingVO vo = bookingService.cancel(id, user.getId(), SecurityUtils.isAdmin(user), reason);
         boolean penalty = vo.getPenaltyPoints() != null && vo.getPenaltyPoints() > 0;
         return Result.success(penalty ? "取消成功，因临近开始时间，已扣除信用分 " + vo.getPenaltyPoints() + " 分" : "取消成功", vo);
-    }
-
-    // 签到 / 签退 / 签到凭证三个接口在 CheckInController 里，属于独立的签到签退模块
-
-    private static boolean isAdmin(LoginUser user) {
-        return UserConstants.ROLE_ADMIN.equals(user.getRole());
     }
 }
