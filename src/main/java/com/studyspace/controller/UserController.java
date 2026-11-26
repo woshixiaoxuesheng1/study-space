@@ -1,7 +1,6 @@
 package com.studyspace.controller;
 
 import com.studyspace.common.Result;
-import com.studyspace.vo.CreditVO;
 import com.studyspace.dto.UpdateProfileRequest;
 import com.studyspace.vo.UserVO;
 import com.studyspace.security.SecurityUtils;
@@ -15,7 +14,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 个人中心接口（A-03 / A-04 / A-05）
+ * 个人中心接口（A-03 / A-04）
+ * <p>信用分与违约记录属于违约模块，接口挂在 /api/violations 下，这里只管资料本身。</p>
  * <p>注意路径里没有 userId：用户身份一律从令牌里取，前端传 userId 也影响不到别人</p>
  */
 @RestController
@@ -35,11 +35,5 @@ public class UserController {
     @PutMapping
     public Result<UserVO> updateMe(@Valid @RequestBody UpdateProfileRequest request) {
         return Result.success("修改成功", userService.updateProfile(SecurityUtils.currentUserId(), request));
-    }
-
-    /** A-05 查看自己的信用分 */
-    @GetMapping("/credit")
-    public Result<CreditVO> myCredit() {
-        return Result.success(userService.getCredit(SecurityUtils.currentUserId()));
     }
 }

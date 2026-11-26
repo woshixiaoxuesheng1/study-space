@@ -16,14 +16,14 @@ import com.studyspace.entity.Booking;
 import com.studyspace.entity.Room;
 import com.studyspace.entity.Seat;
 import com.studyspace.entity.User;
-import com.studyspace.entity.Violation;
 import com.studyspace.enums.BookingStatus;
+import com.studyspace.enums.ViolationType;
 import com.studyspace.mapper.BookingMapper;
 import com.studyspace.mapper.RoomMapper;
 import com.studyspace.mapper.SeatMapper;
 import com.studyspace.mapper.UserMapper;
-import com.studyspace.mapper.ViolationMapper;
 import com.studyspace.service.BookingService;
+import com.studyspace.service.ViolationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,7 +59,8 @@ public class BookingServiceImpl implements BookingService {
     private final SeatMapper seatMapper;
     private final RoomMapper roomMapper;
     private final UserMapper userMapper;
-    private final ViolationMapper violationMapper;
+    /** 违约扣分、写违约记录都由违约模块负责，预约模块只负责"通知它扣一次" */
+    private final ViolationService violationService;
 
     /** 每人每天最多预约几次（需求第 3 章第 5 步"今天订了几次"） */
     @Value("${booking.daily-limit:3}")
@@ -79,15 +80,6 @@ public class BookingServiceImpl implements BookingService {
     /** 信用分限制线，低于它不能预约 */
     @Value("${booking.credit-limit:60}")
     private int creditLimit;
-    /** 信用分低于限制线后禁止预约多少天 */
-    @Value("${booking.ban-days:7}")
-    private int banDays;
-    /** 违约一次扣多少分 */
-    @Value("${booking.no-show-deduct:10}")
-    private int noShowDeduct;
-    /** 临近开始取消扣多少分 */
-    @Value("${booking.late-cancel-deduct:10}")
-    private int lateCancelDeduct;
 
     // ------------------------------------------------------------------
     // 创建预约（A-14）
@@ -230,7 +222,7 @@ public class BookingServiceImpl implements BookingService {
             throw new BusinessException(ResultCode.BOOKING_ALREADY_STARTED);
         }
 
-        // 开始前 30 分钟以外免费取消；以内算违约；管理员代取消不扣学生分
+        // 开始前 cancel-free-minutes 以外免费取消；以内算违约；管理员代取消不扣学生分
         boolean penalty = !admin && !now.isBefore(booking.getStartTime().minusMinutes(cancelFreeMinutes));
 
         String finalReason = StringUtils.hasText(reason)
@@ -240,17 +232,16 @@ public class BookingServiceImpl implements BookingService {
             throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED, "预约状态已变化，请刷新后重试");
         }
 
-        if (penalty) {
-            User user = userMapper.selectById(booking.getUserId());
-            if (user != null) {
-                deductCredit(user, lateCancelDeduct, bookingId, BookingConstants.VIOLATION_LATE_CANCEL,
-                        "开始前 " + cancelFreeMinutes + " 分钟内取消预约，扣 " + lateCancelDeduct + " 分");
-            }
-        }
+        // 扣多少分、扣完要不要禁约，规则全在违约模块里，这里只负责"通知它记一次"。
+        // 返回值是本次实际扣的分，直接回给前端做提示，不会出现"提示扣 10 分、实际扣 20 分"。
+        int penaltyPoints = penalty
+                ? violationService.recordBookingViolation(booking.getUserId(), bookingId, ViolationType.LATE_CANCEL)
+                : 0;
 
         BookingVO vo = assemble(List.of(requireBooking(bookingId)), operatorId, admin).get(0);
-        vo.setPenaltyPoints(penalty ? lateCancelDeduct : 0);
-        log.info("取消预约：bookingId={}, 操作人={}, 是否扣分={}", bookingId, operatorId, penalty);
+        vo.setPenaltyPoints(penaltyPoints);
+        log.info("取消预约：bookingId={}, 操作人={}, 是否扣分={}, 扣分={}",
+                bookingId, operatorId, penalty, penaltyPoints);
         return vo;
     }
 
@@ -289,33 +280,6 @@ public class BookingServiceImpl implements BookingService {
             throw new BusinessException(ResultCode.BOOKING_STATUS_NOT_ALLOWED,
                     "当前预约状态为「" + BookingStatus.textOf(booking.getStatus()) + "」，不能" + action);
         }
-    }
-
-    /**
-     * 扣信用分 + 写违约记录
-     * <p>扣到 60 分以下时写入 ban_until = 现在 + 7 天，到期后比较自然失效，
-     * 不需要额外的"解禁"定时任务。</p>
-     */
-    private void deductCredit(User user, int points, Long bookingId, String type, String reason) {
-        int oldScore = creditOf(user);
-        int newScore = Math.max(0, oldScore - points);
-        user.setCreditScore(newScore);
-        if (newScore < creditLimit) {
-            user.setBanUntil(LocalDateTime.now().plusDays(banDays));
-        }
-        userMapper.updateById(user);
-
-        Violation violation = new Violation();
-        violation.setUserId(user.getId());
-        violation.setBookingId(bookingId);
-        violation.setType(type);
-        violation.setDeductScore(points);
-        violation.setHappenTime(LocalDateTime.now());
-        violation.setReason(reason);
-        violation.setRevoked(0);
-        violationMapper.insert(violation);
-
-        log.info("信用分扣减：userId={}, {} -> {}（{}）", user.getId(), oldScore, newScore, type);
     }
 
     /**

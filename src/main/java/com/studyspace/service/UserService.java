@@ -3,7 +3,6 @@ package com.studyspace.service;
 import com.studyspace.dto.LoginRequest;
 import com.studyspace.dto.RegisterRequest;
 import com.studyspace.dto.UpdateProfileRequest;
-import com.studyspace.vo.CreditVO;
 import com.studyspace.vo.LoginVO;
 import com.studyspace.vo.UserVO;
 
@@ -26,7 +25,4 @@ public interface UserService {
 
     /** 修改自己的昵称、邮箱、手机号（F-03） */
     UserVO updateProfile(Long userId, UpdateProfileRequest request);
-
-    /** 查看自己的信用分（F-04） */
-    CreditVO getCredit(Long userId);
 }

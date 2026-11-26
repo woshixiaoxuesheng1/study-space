@@ -62,7 +62,12 @@ public class SecurityConfig {
                         // /api/rooms/5/seats 这种读接口不会被误伤
                         .requestMatchers(HttpMethod.PUT, "/api/rooms/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/rooms/*").hasRole("ADMIN")
-                        // 其余接口（查自习室、查座位、个人中心等）登录即可访问
+                        // ---------------- 违约管理：管理员的写操作和全量查询 ----------------
+                        // POST 覆盖 /api/violations/{id}/revoke 和 /api/violations/manual；
+                        // GET "/api/violations" 是精确匹配，不会误伤 /api/violations/me 和 /me/credit
+                        .requestMatchers(HttpMethod.POST, "/api/violations/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/violations").hasRole("ADMIN")
+                        // 其余接口（查自习室、查座位、个人中心、我的违约等）登录即可访问
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint((request, response, authException) ->

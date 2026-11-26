@@ -2,7 +2,6 @@ package com.studyspace.service.impl;
 
 import com.studyspace.common.BusinessException;
 import com.studyspace.common.ResultCode;
-import com.studyspace.constants.BookingConstants;
 import com.studyspace.constants.CommonConstants;
 import com.studyspace.constants.RoomConstants;
 import com.studyspace.vo.BookingVO;
@@ -10,15 +9,14 @@ import com.studyspace.vo.CheckInCodeVO;
 import com.studyspace.entity.Booking;
 import com.studyspace.entity.Room;
 import com.studyspace.entity.Seat;
-import com.studyspace.entity.User;
 import com.studyspace.enums.BookingStatus;
+import com.studyspace.enums.ViolationType;
 import com.studyspace.mapper.CheckInMapper;
 import com.studyspace.mapper.RoomMapper;
 import com.studyspace.mapper.SeatMapper;
-import com.studyspace.mapper.UserMapper;
 import com.studyspace.service.BookingService;
 import com.studyspace.service.CheckInService;
-import com.studyspace.service.CreditService;
+import com.studyspace.service.ViolationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,10 +49,10 @@ public class CheckInServiceImpl implements CheckInService {
     private final CheckInMapper checkInMapper;
     private final SeatMapper seatMapper;
     private final RoomMapper roomMapper;
-    private final UserMapper userMapper;
     /** 签到成功后要返回完整的预约信息，直接复用预约模块的详情组装，不重复写一遍 */
     private final BookingService bookingService;
-    private final CreditService creditService;
+    /** 超时未签到的扣分与违约记录由违约模块负责 */
+    private final ViolationService violationService;
 
     /** 签到窗口：开始前多少分钟开放签到 */
     @Value("${booking.check-in-early-minutes:15}")
@@ -62,9 +60,6 @@ public class CheckInServiceImpl implements CheckInService {
     /** 签到窗口：开始后多少分钟截止签到 */
     @Value("${booking.check-in-late-minutes:15}")
     private int checkInLateMinutes;
-    /** 超时未签到扣多少分 */
-    @Value("${booking.no-show-deduct:10}")
-    private int noShowDeduct;
 
     // ------------------------------------------------------------------
     // 签到（A-18）
@@ -227,11 +222,9 @@ public class CheckInServiceImpl implements CheckInService {
         if (checkInMapper.markNoShow(bookingId) == 0) {
             return;
         }
-        User user = userMapper.selectById(booking.getUserId());
-        if (user != null) {
-            creditService.deduct(user, noShowDeduct, bookingId, BookingConstants.VIOLATION_NO_SHOW,
-                    "超过签到截止时间仍未签到，座位自动释放，扣 " + noShowDeduct + " 分");
-        }
+        // 预约单已经确定变成违约，扣分和违约记录交给违约模块；
+        // 它内部按 bookingId 做幂等，定时任务重复跑到同一条也不会扣两次
+        violationService.recordBookingViolation(booking.getUserId(), bookingId, ViolationType.NO_SHOW);
         log.info("超时未签到判违约：bookingId={}, userId={}", bookingId, booking.getUserId());
     }
 

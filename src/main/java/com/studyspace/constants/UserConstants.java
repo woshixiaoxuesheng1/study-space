@@ -17,9 +17,10 @@ public final class UserConstants {
     /** 管理员角色 */
     public static final String ROLE_ADMIN = "ADMIN";
 
-    /** 信用分初始值，同时也是信用分字段为空时的兜底值 */
+    /**
+     * 信用分初始值，同时也是信用分字段为空时的兜底值
+     * <p>信用分限制线（60）和禁约天数（7）属于业务参数，统一放在 application.yaml 的 booking 段，
+     * 预约准入和违约扣分读同一份配置，不在这里再留一个常量副本。</p>
+     */
     public static final int DEFAULT_CREDIT_SCORE = 100;
-
-    /** 信用分限制线：低于它不能预约 */
-    public static final int CREDIT_LIMIT = 60;
 }

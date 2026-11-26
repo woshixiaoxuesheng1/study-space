@@ -3,7 +3,6 @@ package com.studyspace.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.studyspace.common.BusinessException;
 import com.studyspace.common.ResultCode;
-import com.studyspace.constants.CommonConstants;
 import com.studyspace.constants.UserConstants;
 import com.studyspace.dto.LoginRequest;
 import com.studyspace.dto.RegisterRequest;
@@ -13,7 +12,6 @@ import com.studyspace.mapper.UserMapper;
 import com.studyspace.security.JwtUtil;
 import com.studyspace.security.LoginSessionStore;
 import com.studyspace.service.UserService;
-import com.studyspace.vo.CreditVO;
 import com.studyspace.vo.LoginVO;
 import com.studyspace.vo.UserVO;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 
 /**
  * 用户业务实现
@@ -156,30 +153,6 @@ public class UserServiceImpl implements UserService {
 
         userMapper.updateById(user);
         return UserVO.from(requireUser(userId));
-    }
-
-    @Override
-    public CreditVO getCredit(Long userId) {
-        User user = requireUser(userId);
-        int score = user.getCreditScore() == null ? UserConstants.DEFAULT_CREDIT_SCORE : user.getCreditScore();
-        LocalDateTime banUntil = user.getBanUntil();
-        boolean bannedByTime = banUntil != null && banUntil.isAfter(LocalDateTime.now());
-        boolean canBook = score >= UserConstants.CREDIT_LIMIT && !bannedByTime;
-
-        CreditVO vo = new CreditVO();
-        vo.setCreditScore(score);
-        vo.setLimitScore(UserConstants.CREDIT_LIMIT);
-        vo.setCanBook(canBook);
-        vo.setBanUntil(banUntil == null ? null : CommonConstants.DATE_TIME_FORMATTER.format(banUntil));
-        if (canBook) {
-            vo.setMessage("信用分正常，可以预约座位");
-        } else if (bannedByTime) {
-            long days = Math.max(1, Duration.between(LocalDateTime.now(), banUntil).toDays() + 1);
-            vo.setMessage("信用分 " + score + " 分低于 " + UserConstants.CREDIT_LIMIT + " 分，约 " + days + " 天后自动恢复预约权限");
-        } else {
-            vo.setMessage("信用分 " + score + " 分低于 " + UserConstants.CREDIT_LIMIT + " 分，暂时无法预约");
-        }
-        return vo;
     }
 
     private User requireUser(Long userId) {

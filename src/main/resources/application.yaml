@@ -66,11 +66,22 @@ booking:
   check-in-early-minutes: 15
   check-in-late-minutes: 15
   # 信用分低于 limit 不能预约，并禁止预约 ban-days 天
+  # 违约模块扣分后也按这两个值决定要不要禁约，两处读同一份配置
   credit-limit: 60
   ban-days: 7
-  # 违约扣分：超时未签到 / 临近开始取消
+
+# 违约规则：扣多少分、信用分页展示多少天，都在这里调，不用改 Java
+violation:
+  # 超时未签到扣多少分
   no-show-deduct: 10
+  # 临近开始才取消扣多少分
   late-cancel-deduct: 10
+  # 管理员手动扣分单次上限
+  manual-max-points: 100
+  # 信用分页展示最近多少天的违约明细
+  recent-days: 90
+  # 信用分页最多带多少条明细，再多就走违约记录分页接口
+  recent-limit: 20
 
 logging:
   level:

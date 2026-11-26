@@ -42,6 +42,9 @@ public enum ResultCode {
     BOOKING_TIME_PAST(3012, "只能预约未来的时间段"),
     BOOKING_DURATION_TOO_SHORT(3013, "预约时长太短"),
 
+    VIOLATION_NOT_FOUND(4001, "违约记录不存在"),
+    VIOLATION_ALREADY_REVOKED(4002, "该违约记录已撤销，不能重复撤销"),
+
     SERVER_ERROR(500, "系统繁忙，请稍后再试");
 
     private final int code;

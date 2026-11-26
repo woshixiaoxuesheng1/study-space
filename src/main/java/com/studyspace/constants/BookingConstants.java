@@ -3,7 +3,8 @@ package com.studyspace.constants;
 import java.time.format.DateTimeFormatter;
 
 /**
- * 预约、签到与违约记录相关常量
+ * 预约与签到相关常量
+ * <p>违约类型不再用字符串常量：它是有固定取值集合、还要带中文文案的，放在 ViolationType 枚举里。</p>
  */
 public final class BookingConstants {
 
@@ -18,12 +19,6 @@ public final class BookingConstants {
 
     /** 取消 / 违约原因最长字符数，与 booking.cancel_reason varchar(255) 对齐 */
     public static final int MAX_REASON_LENGTH = 255;
-
-    /** 违约类型：超时未签到 */
-    public static final String VIOLATION_NO_SHOW = "NO_SHOW";
-
-    /** 违约类型：临近开始才取消 */
-    public static final String VIOLATION_LATE_CANCEL = "LATE_CANCEL";
 
     /** 预约状态字符串：待签到（与 BookingStatus 枚举名一致，供只比较数据库字符串的地方使用） */
     public static final String STATUS_PENDING_CHECKIN = "PENDING_CHECKIN";
