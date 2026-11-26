@@ -1,6 +1,7 @@
 package com.studyspace.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.studyspace.cache.RoomListCacheStore;
 import com.studyspace.common.BusinessException;
 import com.studyspace.common.ResultCode;
 import com.studyspace.constants.BookingConstants;
@@ -23,6 +24,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
@@ -38,6 +41,8 @@ import java.util.Map;
  * 自习室与座位业务实现
  * <p>座位显示状态由 booking 表实时算，不依赖 seat.status 字段——
  * 因为预约模块还没写，seat.status 不会自动变，光看字段会出现"有人正在用却显示空闲"的假象</p>
+ * <p>自习室列表走 Redis 缓存（Cache-Aside）：读先查缓存，未命中查库回填；写改完数据库、
+ * 事务提交后清缓存。座位布局、空闲座位这类带实时状态的接口不缓存，避免读到过期的占用情况</p>
  */
 @Slf4j
 @Service
@@ -47,6 +52,7 @@ public class RoomServiceImpl implements RoomService {
     private final RoomMapper roomMapper;
     private final SeatMapper seatMapper;
     private final BookingMapper bookingMapper;
+    private final RoomListCacheStore roomListCache;
 
     @Override
     public PageResult<RoomVO> pageRooms(int page, int size, String status, String keyword) {
@@ -54,21 +60,35 @@ public class RoomServiceImpl implements RoomService {
         int safeSize = Math.min(Math.max(size, 1), CommonConstants.MAX_PAGE_SIZE);
         String key = StringUtils.hasText(keyword) ? keyword.trim() : null;
 
+        // 命中缓存就直接返回，一条 SQL 都不发（连续请求列表页时，只有第一次会看到 mapper 的 SQL 日志）
+        String cacheKey = roomListCache.key(safePage, safeSize, status, key);
+        PageResult<RoomVO> cached = roomListCache.get(cacheKey);
+        if (cached != null) {
+            log.debug("自习室列表命中缓存：key={}", cacheKey);
+            return cached;
+        }
+        log.info("自习室列表未命中缓存，回源数据库：key={}", cacheKey);
+
         LambdaQueryWrapper<Room> wrapper = new LambdaQueryWrapper<Room>()
                 .eq(StringUtils.hasText(status), Room::getStatus, status)
                 .and(key != null, w -> w.like(Room::getName, key).or().like(Room::getBuilding, key))
                 .orderByAsc(Room::getId);
 
         long total = roomMapper.selectCount(wrapper);
+        PageResult<RoomVO> result;
         if (total == 0) {
-            return PageResult.empty(safePage, safeSize);
+            // 空结果也回填：查不到数据的关键字通常是用户手快打错的，缓存住可以挡住重复穿透
+            result = PageResult.empty(safePage, safeSize);
+        } else {
+            // 没有引入分页插件（要多一个 jsqlparser 依赖），这里用 LIMIT 手动分页；
+            // 两个数字都是后端算好的 int，不存在拼接注入的问题
+            wrapper.last("LIMIT " + (long) (safePage - 1) * safeSize + ", " + safeSize);
+            List<RoomVO> list = roomMapper.selectList(wrapper).stream().map(RoomVO::from).toList();
+            result = new PageResult<>(total, safePage, safeSize, list);
         }
 
-        // 没有引入分页插件（要多一个 jsqlparser 依赖），这里用 LIMIT 手动分页；
-        // 两个数字都是后端算好的 int，不存在拼接注入的问题
-        wrapper.last("LIMIT " + (long) (safePage - 1) * safeSize + ", " + safeSize);
-        List<RoomVO> list = roomMapper.selectList(wrapper).stream().map(RoomVO::from).toList();
-        return new PageResult<>(total, safePage, safeSize, list);
+        roomListCache.put(cacheKey, result);
+        return result;
     }
 
     @Override
@@ -87,6 +107,7 @@ public class RoomServiceImpl implements RoomService {
         room.setStatus(StringUtils.hasText(request.getStatus()) ? request.getStatus() : RoomConstants.ROOM_STATUS_OPEN);
         room.setSeatCount(0);
         roomMapper.insert(room);
+        evictListCache();
 
         log.info("新增自习室：id={}, name={}", room.getId(), room.getName());
         return RoomVO.from(room);
@@ -104,6 +125,7 @@ public class RoomServiceImpl implements RoomService {
             room.setStatus(request.getStatus());
         }
         roomMapper.updateById(room);
+        evictListCache();
 
         log.info("修改自习室：id={}, name={}", room.getId(), room.getName());
         return RoomVO.from(requireRoom(roomId));
@@ -122,6 +144,7 @@ public class RoomServiceImpl implements RoomService {
         roomMapper.deleteById(roomId);
         // 座位跟着一起逻辑删除，页面上查这间房的座位就查不到了
         seatMapper.delete(new LambdaQueryWrapper<Seat>().eq(Seat::getRoomId, roomId));
+        evictListCache();
 
         log.info("删除自习室（逻辑删除）：id={}, name={}", roomId, room.getName());
     }
@@ -188,6 +211,8 @@ public class RoomServiceImpl implements RoomService {
         // 座位总数回写自习室，列表页直接显示，不用每次 count
         room.setSeatCount(seats.size());
         roomMapper.updateById(room);
+        // 座位数变了，列表页显示的数字也要跟着变
+        evictListCache();
 
         log.info("自习室 {} 生成座位完成：{} 行 × {} 列 = {} 个", roomId, rows, cols, seats.size());
         return getSeatLayout(roomId);
@@ -234,6 +259,25 @@ public class RoomServiceImpl implements RoomService {
             throw new BusinessException(ResultCode.ROOM_NOT_FOUND);
         }
         return room;
+    }
+
+    /**
+     * 清自习室列表缓存，挂在事务提交之后执行
+     * <p>提交前删掉的话，读线程很可能在新数据落库前就回源、把旧数据重新写回缓存，
+     * 而它读到的旧数据又被后面提交的事务覆盖了，缓存会一直脏到 TTL 过期。
+     * 所以统一等提交成功再删；事务回滚时缓存本来就该保持原样，没必要动</p>
+     */
+    private void evictListCache() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            roomListCache.evictAll();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                roomListCache.evictAll();
+            }
+        });
     }
 
     private void fill(Room room, RoomRequest request) {

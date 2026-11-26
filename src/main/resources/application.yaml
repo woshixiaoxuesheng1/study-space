@@ -13,7 +13,7 @@ spring:
       minimum-idle: 5
       maximum-pool-size: 20
       connection-timeout: 30000
-  # Redis：存登录状态（白名单 + 会话快照）和登录失败次数
+  # Redis：存登录状态（白名单 + 会话快照）、登录失败次数、自习室列表缓存
   data:
     redis:
       host: 127.0.0.1
@@ -53,6 +53,11 @@ login:
   fail-window-minutes: 15
   # 同一账号是否只允许一个有效会话（新登录把旧登录顶下线）
   single-session: true
+
+# 缓存：自习室列表读多写少，整页结果放 Redis，写操作后主动删除
+cache:
+  # 自习室列表缓存有效期（分钟），过期后下一次请求回源数据库并重新回填
+  room-list-ttl-minutes: 10
 
 # 预约规则：改这里就能调整业务参数，不用改 Java 代码
 booking:
