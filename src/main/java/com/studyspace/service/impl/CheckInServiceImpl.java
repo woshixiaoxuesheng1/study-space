@@ -9,11 +9,15 @@ import com.studyspace.vo.CheckInCodeVO;
 import com.studyspace.entity.Booking;
 import com.studyspace.entity.Room;
 import com.studyspace.entity.Seat;
+import com.studyspace.entity.User;
 import com.studyspace.enums.BookingStatus;
 import com.studyspace.enums.ViolationType;
 import com.studyspace.mapper.CheckInMapper;
 import com.studyspace.mapper.RoomMapper;
 import com.studyspace.mapper.SeatMapper;
+import com.studyspace.mapper.UserMapper;
+import com.studyspace.mq.NotifyMessages;
+import com.studyspace.mq.NotifyProducer;
 import com.studyspace.service.BookingService;
 import com.studyspace.service.CheckInService;
 import com.studyspace.service.ViolationService;
@@ -49,10 +53,13 @@ public class CheckInServiceImpl implements CheckInService {
     private final CheckInMapper checkInMapper;
     private final SeatMapper seatMapper;
     private final RoomMapper roomMapper;
+    private final UserMapper userMapper;
     /** 签到成功后要返回完整的预约信息，直接复用预约模块的详情组装，不重复写一遍 */
     private final BookingService bookingService;
     /** 超时未签到的扣分与违约记录由违约模块负责 */
     private final ViolationService violationService;
+    /** 违约、到点完成的站内通知走 MQ 投递 */
+    private final NotifyProducer notifyProducer;
 
     /** 签到窗口：开始前多少分钟开放签到 */
     @Value("${booking.check-in-early-minutes:15}")
@@ -224,8 +231,20 @@ public class CheckInServiceImpl implements CheckInService {
         }
         // 预约单已经确定变成违约，扣分和违约记录交给违约模块；
         // 它内部按 bookingId 做幂等，定时任务重复跑到同一条也不会扣两次
-        violationService.recordBookingViolation(booking.getUserId(), bookingId, ViolationType.NO_SHOW);
-        log.info("超时未签到判违约：bookingId={}, userId={}", bookingId, booking.getUserId());
+        int points = violationService.recordBookingViolation(booking.getUserId(), bookingId, ViolationType.NO_SHOW);
+        log.info("超时未签到判违约：bookingId={}, userId={}, 扣分={}", bookingId, booking.getUserId(), points);
+
+        // points 为 0 说明违约模块判定"这条已经记过"，那就没必要再发一次通知，
+        // 否则定时任务多跑一轮，学生就会收到两条一模一样的违约提醒
+        if (points > 0) {
+            Seat seat = seatMapper.selectById(booking.getSeatId());
+            Room room = seat == null ? null : roomMapper.selectById(seat.getRoomId());
+            User user = userMapper.selectById(booking.getUserId());
+            notifyProducer.publishAfterCommit(NotifyMessages.noShow(
+                    booking, seat, room, points,
+                    user == null ? null : user.getCreditScore(),
+                    "请按时签到，避免再次违约扣分"));
+        }
     }
 
     @Override
@@ -245,6 +264,12 @@ public class CheckInServiceImpl implements CheckInService {
             return;
         }
         log.info("预约到点自动完成：bookingId={}", bookingId);
+
+        // 到点自动结束也给学生一条通知：很多人走了之后不点签退，
+        // 收到"已完成"才知道自己没有因为没签退被记异常
+        Seat seat = seatMapper.selectById(booking.getSeatId());
+        Room room = seat == null ? null : roomMapper.selectById(seat.getRoomId());
+        notifyProducer.publishAfterCommit(NotifyMessages.completed(booking, seat, room));
     }
 
     // ------------------------------------------------------------------

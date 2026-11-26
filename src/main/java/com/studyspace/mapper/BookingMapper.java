@@ -106,4 +106,24 @@ public interface BookingMapper extends BaseMapper<Booking> {
                AND status = 'PENDING_CHECKIN'
             """)
     int markCancelled(@Param("id") Long id, @Param("reason") String reason);
+
+    /**
+     * 找出"即将开始"的预约，给提醒任务用
+     *
+     * <p>条件是 start_time 落在 {@code [from, to)} 这个左闭右开的一分钟区间里。
+     * 提醒任务每分钟跑一次、每次都把 now 截断到整分钟再算区间，
+     * 所以连续两轮的区间首尾相接、不重不漏，每条预约只会被扫到一次。
+     * 即使任务执行时刻有几十毫秒偏差，也不会因为小数点后的时间把边界预约漏掉。</p>
+     *
+     * <p>只要"待签到"的：已经签到的不需要提醒，已取消、已违约的更不需要。</p>
+     */
+    @Select("""
+            SELECT *
+            FROM booking
+            WHERE status = 'PENDING_CHECKIN'
+              AND start_time >= #{from}
+              AND start_time < #{to}
+            ORDER BY start_time
+            """)
+    List<Booking> selectUpcoming(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 }

@@ -83,6 +83,16 @@
 - 低于 60 分禁止预约，`ban_until` 记录解禁时间，到点自然失效（无需再跑解禁任务）
 - 违约记录落库，含类型、扣分、原因、发生时间，支持管理员撤销
 
+### 消息通知
+
+- 四类事件自动推送：预约成功、预约即将开始（开始前 15 分钟）、预约取消、超时未签到违约；到点自动结束也会推一条
+- **业务主流程不等待通知**：预约、签到、违约模块只负责"往 RabbitMQ 发一条消息"，通知落库由消费者异步完成
+- 消息在**事务提交后**才投递：事务回滚不会产生"数据库里没有预约、学生却收到预约成功"的幽灵通知
+- 消费失败自动重试（首次 + 2 次，指数退避），仍失败转**死信队列** `study.notify.dlq` 留存，消息不丢
+- 消费端**幂等**：用 `messageId` 在 Redis 里 SET NX 占位，RabbitMQ 重投同一条消息不会产生两条通知
+- 站内消息中心：分页列表、按分类筛选、只看未读、未读数角标、单条/全部标记已读
+- 通知的收发都是"尽力而为"：RabbitMQ 挂掉时预约照常成功，只丢通知，不影响业务
+
 ### 工程规范
 
 - 统一返回 `{code, message, data}`：成功 `code=0`，业务失败 HTTP 200 + 非 0 码，认证失败 401，越权 403
@@ -101,7 +111,8 @@
 | 安全 | Spring Security + JWT | 7 / 0.12.7 | 基于 JJWT 实现无状态鉴权，认证失败由 `SecurityConfig` 直接输出 JSON |
 | 持久层 | MyBatis-Plus | 3.5.18.1 | `mybatis-plus-spring-boot4-starter` |
 | 数据库 | MySQL | 8.0 | 6 张表，`booking` 表核心 |
-| 缓存 | Redis | 8.x | 登录白名单 / 会话快照 / 登录失败计数；自习室列表缓存 |
+| 缓存 | Redis | 8.x | 登录白名单 / 会话快照 / 登录失败计数；自习室列表缓存；通知消费幂等标记 |
+| 消息队列 | RabbitMQ | 4.4.1 | AMQP 0-9-1（`spring-rabbit` 4.2），预约通知异步投递 + 死信队列 |
 | 校验 | Spring Validation | — | `@Valid` + 全局异常处理 |
 | 构建 | Maven | 3.9.x | `mvn spring-boot:run` |
 
@@ -133,7 +144,19 @@
 │  行锁 / 重叠查询 / 条件更新                       │
 └─────────────────────────────────────────────────┘
         ▼
-   MySQL（6 张表）   Redis（登录态 / 列表缓存）   定时任务（每分钟扫描）
+   MySQL（6 张表）   Redis（登录态 / 列表缓存 / 消费幂等标记）
+
+   业务模块（预约 / 签到 / 违约）
+        │  事务提交后发消息
+        ▼
+   RabbitMQ  study.notify.exchange(topic) → study.notify.queue → 消费者
+        │                                        │ 重试用尽
+        │                                        ▼
+        │                                  study.notify.dlq（死信留存）
+        ▼
+   notification 表  ◄──  通知服务（渲染正文 + 幂等落库）
+
+   定时任务（每分钟）：超时未签到判违约 / 已到结束时间自动完成 / 提醒即将开始
 ```
 
 ### 目录结构
@@ -143,15 +166,16 @@ src/main/java/com/studyspace
 ├── cache/         Redis 缓存读写（自习室列表缓存：拼 key、回填、延迟双删）
 ├── common/        统一返回 Result、错误码 ResultCode、业务异常、全局异常处理
 ├── config/        SecurityConfig、MyBatis-Plus 自动填充
-├── constants/     业务常量（预约编号前缀、违约类型、角色、状态字面量）
-├── controller/    Auth / User / Room / Booking / CheckIn
+├── constants/     业务常量（预约编号前缀、违约类型、角色、MQ 队列与路由键）
+├── controller/    Auth / User / Room / Booking / CheckIn / Violation / Notification
 ├── dto/           入参对象与分页包装 PageResult
-├── entity/        User / Room / Seat / Booking / Violation
-├── enums/         BookingStatus（含合法流转规则）
+├── entity/        User / Room / Seat / Booking / Violation / Notification
+├── enums/         BookingStatus（含合法流转规则）、NotifyEvent、NotifyType
 ├── mapper/        MyBatis-Plus Mapper + 手写 SQL
+├── mq/            RabbitMQ 配置、消息体、生产者、消费者、消息工厂
 ├── security/      JWT 工具、认证过滤器、Redis 会话仓库、当前用户工具
 ├── service/       业务接口与实现
-├── task/          超时释放 / 到点完成的定时任务
+├── task/          超时释放 / 到点完成 / 即将开始提醒
 └── vo/            出参对象（不含密码等敏感字段）
 ```
 
@@ -230,6 +254,28 @@ room:list:page:{page}:size:{size}:status:{status}:kw:{keyword}   TTL 10 分钟
 
 座位布局和空闲座位接口**不缓存**——它们带实时占用状态，宁可多查一次库也不能返回过期的"空位"。
 
+### 7. 通知为什么走 MQ，而不是在业务方法里直接写库
+
+直接在 `create()` 里 `notificationMapper.insert()` 有两个绕不开的问题：
+
+- **跟着业务事务走**：通知表任何异常都会把预约一起回滚，一个"附属功能"能拖垮主流程；
+- **开新事务也一样**：`REQUIRES_NEW` 只是把回滚隔开，"写通知"的耗时仍然压在 HTTP 请求线程上。
+
+走 MQ 之后，业务方法只负责把消息交给交换机然后立刻返回，落库、渲染文案、失败重试全在消费者线程完成。三个关键细节：
+
+1. **提交后才发**：`NotifyProducer.publishAfterCommit()` 用 `TransactionSynchronization#afterCommit` 把投递挂在事务上。事务回滚时 `afterCommit` 根本不执行，不会发出"数据库里没有、学生却收到"的幽灵通知。
+2. **投递失败不抛**：`convertAndSend` 外面套了 try-catch，只记 error 日志。RabbitMQ 挂掉时预约照样成功——通知是"尽力而为"，不是"必须成功"。
+3. **消费端幂等**：RabbitMQ 是**至少一次**投递，消费者 ack 前宕机会重投。用 `messageId` 做 Redis `SET NX` 占位，重复消息直接跳过；若落库失败，会把刚写的标记删掉再抛异常，否则重投那次会被自己刚写的标记挡住，通知永久丢失。
+
+**失败兜底**：消费抛异常 → 拦截器重试（首次 + 2 次，1s/2s 退避）→ 仍失败则 reject 且不重回队列 → 按队列上的 `dead-letter-exchange` 转进 `study.notify.dlq`，管理台里能看到堆积，人工处理而不是悄悄丢掉。
+
+**为什么"即将开始"提醒用定时扫描，不用延迟队列**：
+
+- TTL + 死信只检查队头：先投"明天上午"（TTL 20h）、再投"今天下午"（TTL 2h），后者会被前者堵住，提醒直接迟到十几个小时；
+- 延迟插件要额外装 `rabbitmq_delayed_message_exchange`，换台机器部署就得再装一遍。
+
+定时扫描每分钟取 `[now+15min, now+16min)` 这一个左闭右开区间，把 `now` 截断到整分钟，相邻两轮首尾相接、不重不漏；重复执行的风险用 Redis 的 `notify:remind:{bookingId}` 标记兜住。
+
 ---
 
 ## 接口清单
@@ -245,7 +291,6 @@ room:list:page:{page}:size:{size}:status:{status}:kw:{keyword}   TTL 10 分钟
 | POST | `/api/logout` | 退出，清除登录态使令牌立即失效 | 登录 |
 | GET | `/api/users/me` | 查看本人资料 | 登录 |
 | PUT | `/api/users/me` | 修改昵称 / 邮箱 / 手机号 | 登录 |
-| GET | `/api/users/me/credit` | 查看信用分、禁约状态与可预约提示 | 登录 |
 
 ### 自习室与座位
 
@@ -277,6 +322,27 @@ room:list:page:{page}:size:{size}:status:{status}:kw:{keyword}   TTL 10 分钟
 | POST | `/api/bookings/{id}/check-in` | 签到（需提交签到码） | 本人 |
 | POST | `/api/bookings/{id}/check-out` | 签退 | 本人 |
 
+### 违约与信用分
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/violations/me/credit` | 查看信用分、禁约状态与可预约提示 | 登录 |
+| GET | `/api/violations/me?page=&size=&type=` | 我的违约记录（分页） | 登录 |
+| GET | `/api/violations?page=&size=&type=&revoked=&keyword=` | 全量违约记录（可搜学号 / 昵称） | 管理员 |
+| POST | `/api/violations/{id}/revoke` | 撤销违约并返还信用分 | 管理员 |
+| POST | `/api/violations/manual` | 管理员手动扣分 | 管理员 |
+
+### 消息通知
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/notifications?page=&size=&type=&unreadOnly=` | 我的通知（分页，可按分类筛选、只看未读） | 登录 |
+| GET | `/api/notifications/unread-count` | 未读条数（消息中心角标） | 登录 |
+| PUT | `/api/notifications/{id}/read` | 单条标记已读 | 本人 |
+| PUT | `/api/notifications/read-all` | 全部标记已读，返回本次处理条数 | 登录 |
+
+> 通知**只能由 MQ 消费端产生**，没有"新建通知"接口，避免前端伪造系统消息。接收人一律从令牌取，看不到别人的通知。
+
 ### 响应示例
 
 ```json
@@ -294,6 +360,19 @@ room:list:page:{page}:size:{size}:status:{status}:kw:{keyword}   TTL 10 分钟
 - Maven 3.9+
 - MySQL 8.0+
 - Redis 8.x（用于登录态与列表缓存；未启动无法登录，列表接口会降级为直查数据库）
+- RabbitMQ 4.x（用于预约通知；**未启动时业务照常可用**，只是收不到站内通知，日志里会有投递失败记录）
+
+### RabbitMQ 启动（便携版，无需安装服务）
+
+本项目在 `D:\develop\RabbitMQ-4.4.1` 下放了一份免安装的 RabbitMQ + Erlang，双击即可：
+
+```bat
+D:\develop\RabbitMQ-4.4.1\start-rabbitmq.bat
+```
+
+- 服务地址：`amqp://localhost:5672`，账号 `guest / guest`
+- 管理台：<http://localhost:15672>（同样 `guest / guest`），能在 Queues 里看到 `study.notify.queue` 的 ready / consumers，演示时很直观
+- 首次启动若提示 `PRECONDITION_FAILED`，说明 broker 上留着属性不一致的旧队列，去管理台把 `study.notify.*` 删掉后重启即可
 
 ### 1. 初始化数据库
 
@@ -317,6 +396,12 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6379
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
 ```
 
 ### 3. 启动
@@ -346,6 +431,14 @@ curl -X POST http://localhost:8080/api/bookings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"seatId":1,"startTime":"2026-11-25 10:00:00","endTime":"2026-11-25 12:00:00"}'
+
+# 查站内通知（创建后等 1 秒，消息经 RabbitMQ 异步落库）
+curl "http://localhost:8080/api/notifications?page=1&size=5" \
+  -H "Authorization: Bearer <token>"
+
+# 未读角标
+curl "http://localhost:8080/api/notifications/unread-count" \
+  -H "Authorization: Bearer <token>"
 ```
 
 ---
@@ -358,13 +451,18 @@ curl -X POST http://localhost:8080/api/bookings \
 | --- | --- | --- |
 | `booking.daily-limit` | 3 | 每人每天最多预约次数 |
 | `booking.min-duration-minutes` | 60 | 单次预约最短时长（分钟） |
-| `booking.cancel-free-minutes` | 30 | 开始前多少分钟以外取消免费 |
+| `booking.cancel-free-minutes` | 15 | 开始前多少分钟以外取消免费 |
 | `booking.check-in-early-minutes` | 15 | 签到窗口：开始前多少分钟开放 |
 | `booking.check-in-late-minutes` | 15 | 签到窗口：开始后多少分钟截止 |
 | `booking.credit-limit` | 60 | 低于该信用分禁止预约 |
 | `booking.ban-days` | 7 | 低信用分解禁所需天数 |
-| `booking.no-show-deduct` | 10 | 超时未签到扣分 |
-| `booking.late-cancel-deduct` | 10 | 临近开始取消扣分 |
+| `violation.no-show-deduct` | 10 | 超时未签到扣分 |
+| `violation.late-cancel-deduct` | 10 | 临近开始取消扣分 |
+| `violation.manual-max-points` | 100 | 管理员手动扣分单次上限 |
+| `notify.remind-minutes` | 15 | 预约开始前多少分钟发"即将开始"提醒 |
+| `notify.consumer.prefetch` | 10 | 消费者单次预取条数 |
+| `notify.consumer.max-retries` | 2 | 消费失败重试次数（首次之外，总计最多 3 次） |
+| `notify.consumer.initial-interval-ms` | 1000 | 首次重试间隔，之后按 `multiplier` 递增 |
 | `login.max-fail-times` | 5 | 连续登录失败几次锁定 |
 | `login.lock-minutes` | 15 | 锁定时长 |
 | `login.single-session` | true | 是否只允许一个有效会话 |
@@ -400,10 +498,10 @@ curl -X POST http://localhost:8080/api/bookings \
 | 超时未签到自动违约、到点自动完成 | ✅ |
 | 管理端违约记录查询与撤销 | 🚧 |
 | 自习室列表 Redis 缓存 | ✅ |
-| RabbitMQ 延迟队列替代定时扫描 | 🚧 |
+| 站内通知：MQ 异步投递、消息中心、已读管理 | ✅ |
+| 预约提醒（开始前 15 分钟定时扫描 + MQ） | ✅ |
 | 座位推荐（加权评分） | 🚧 |
 | 使用数据统计图表 | 🚧 |
-| 站内通知（表结构已就绪） | 🚧 |
 | Vue 3 前端页面 | 🚧 |
 
 ---

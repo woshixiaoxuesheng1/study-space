@@ -22,6 +22,8 @@ import com.studyspace.mapper.BookingMapper;
 import com.studyspace.mapper.RoomMapper;
 import com.studyspace.mapper.SeatMapper;
 import com.studyspace.mapper.UserMapper;
+import com.studyspace.mq.NotifyMessages;
+import com.studyspace.mq.NotifyProducer;
 import com.studyspace.service.BookingService;
 import com.studyspace.service.ViolationService;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +63,8 @@ public class BookingServiceImpl implements BookingService {
     private final UserMapper userMapper;
     /** 违约扣分、写违约记录都由违约模块负责，预约模块只负责"通知它扣一次" */
     private final ViolationService violationService;
+    /** 预约成功 / 取消都要给学生发一条站内通知，由它投递到 MQ */
+    private final NotifyProducer notifyProducer;
 
     /** 每人每天最多预约几次（需求第 3 章第 5 步"今天订了几次"） */
     @Value("${booking.daily-limit:3}")
@@ -164,6 +168,15 @@ public class BookingServiceImpl implements BookingService {
 
         log.info("预约成功：bookingNo={}, userId={}, seatId={}, {} - {}",
                 booking.getBookingNo(), userId, seat.getId(), fmt(start), fmt(end));
+
+        // 预约成功通知：publishAfterCommit 只是把消息"挂"在事务上，等事务提交才真正投递。
+        // 如果后面任何一步失败导致回滚，这条通知不会发出去；
+        // 如果 RabbitMQ 正好挂了，这里也只会记日志，不会把已经成功的预约变成失败。
+        notifyProducer.publishAfterCommit(NotifyMessages.created(
+                booking, seat, room,
+                start.minusMinutes(checkInEarlyMinutes),
+                start.plusMinutes(checkInLateMinutes)));
+
         return assemble(List.of(booking), userId, false).get(0);
     }
 
@@ -242,6 +255,15 @@ public class BookingServiceImpl implements BookingService {
         vo.setPenaltyPoints(penaltyPoints);
         log.info("取消预约：bookingId={}, 操作人={}, 是否扣分={}, 扣分={}",
                 bookingId, operatorId, penalty, penaltyPoints);
+
+        // 取消通知：为了拼出「图书馆三楼自习室 A02」这种座位名，补两次主键查询；
+        // 扣过分的话再读一次用户，把扣完之后的信用分一起告诉学生（没扣分就不用查）
+        Seat seat = seatMapper.selectById(booking.getSeatId());
+        Room room = seat == null ? null : roomMapper.selectById(seat.getRoomId());
+        Integer creditAfter = penaltyPoints > 0 ? currentCredit(booking.getUserId()) : null;
+        notifyProducer.publishAfterCommit(NotifyMessages.cancelled(
+                booking, seat, room, finalReason, penaltyPoints, creditAfter));
+
         return vo;
     }
 
@@ -383,6 +405,12 @@ public class BookingServiceImpl implements BookingService {
 
     private int creditOf(User user) {
         return user.getCreditScore() == null ? UserConstants.DEFAULT_CREDIT_SCORE : user.getCreditScore();
+    }
+
+    /** 读一次用户当前信用分，用户已被删掉时返回 null（通知里就不写具体分数了） */
+    private Integer currentCredit(Long userId) {
+        User user = userMapper.selectById(userId);
+        return user == null ? null : creditOf(user);
     }
 
     private String truncate(String text) {

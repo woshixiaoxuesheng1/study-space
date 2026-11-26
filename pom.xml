@@ -9,7 +9,7 @@
         <version>4.2.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.heima</groupId>
+    <groupId>com.studyspce</groupId>
     <artifactId>study-space</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>study-space</name>
@@ -56,6 +56,17 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!--RabbitMQ：预约通知异步投递。
+            Spring Boot 4 按协议把 AMQP 拆成了两个 starter，别选错：
+            · spring-boot-starter-amqp          → AMQP 1.0 通用抽象，不含 RabbitMQ 0-9-1 客户端
+            · spring-boot-starter-amqp-rabbitmq → AMQP 1.0，核心类是 RabbitAmqpTemplate
+            而本项目用的 RabbitTemplate 属于 AMQP 0-9-1（spring-rabbit），Boot 4.2 已不再为它
+            提供自动配置，所以直接引 spring-rabbit，由 mq/RabbitMqConfig 手工装配。
+            版本由 spring-boot-dependencies 的 BOM 统一管理（spring-amqp 4.2.0）-->
+        <dependency>
+            <groupId>org.springframework.amqp</groupId>
+            <artifactId>spring-rabbit</artifactId>
         </dependency>
         <!--JWT-->
         <dependency>
